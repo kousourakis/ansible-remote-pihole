@@ -1,0 +1,10 @@
+[Unit]
+Description=check syncthing folder timer
+
+[Timer]
+OnBootSec=2m
+OnCalendar=minutely
+Unit=check-ngrok-flag.service
+
+[Install]
+WantedBy=timers.target

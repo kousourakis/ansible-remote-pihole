@@ -1,0 +1,27 @@
+#!/usr/bin/expect -f
+
+set force_conservative 0  ;# set to 1 to force conservative mode even if
+                          ;# script wasn't run conservatively originally
+if {$force_conservative} {
+        set send_slow {1 .1}
+        proc send {ignore arg} {
+                sleep .1
+                exp_send -s -- $arg
+        }
+}
+
+set timeout -1
+spawn google-authenticator
+match_max 100000
+expect -exact "\r
+Do you want authentication tokens to be time-based (y/n) "
+send -- "y\r"
+expect -re "\.*Your new secret key is:\.*\r"
+send -- "y\r"
+expect -re "\.*Do you want to disallow multiple uses of the same authentication\.*\r"
+send -- "y\r"
+expect -re "\.*allow an extra token before and after the current time\.*\r"
+send -- "y\r"
+expect -re "\.*enable rate-limiting for the authentication module\.*\r"
+send -- "y\r"
+expect eof

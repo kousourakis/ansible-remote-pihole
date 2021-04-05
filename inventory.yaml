@@ -1,0 +1,15 @@
+rpihole:
+  hosts:
+    pihole1:
+      ansible_host: ANSIBLE_HOST_IP
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    ansible_user: pi
+#    ansible_ssh_private_key_file: /home/null/.ssh/id_ecdsa
+#    ansible_port: SSH_PORT TO CHANGE TO
+    timezone: TIMEZONE
+    public_key_path: PUBLIC_KEY_TO_WHITELIST
+    ssh_port_number: SSH_PORT_TO_CHANGE_TO
+    ansible_password: raspberry # only used on first run
+    ngrok_auth_token: NGROK_TOKEN_AUTH

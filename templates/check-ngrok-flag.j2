@@ -1,0 +1,10 @@
+[Unit]
+Description=check syncthing folder service for ngrok flag
+After=network.target
+
+[Service]
+User={{ ansible_user }}
+ExecStart=/home/{{ ansible_user }}/ngrok.d/trigger_ngrok.sh
+
+[Install]
+WantedBy=multi-user.target

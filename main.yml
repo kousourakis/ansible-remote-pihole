@@ -1,0 +1,304 @@
+---
+- hosts: rpihole
+  tasks:
+
+    - name: Update all installed packages using APT module
+      apt:
+        name: '*'
+        state: latest
+        update_cache: yes
+        only_upgrade: yes
+      #      register: apt_update_status
+      become: yes
+
+    #    - name: Debug specific var
+    #      debug: var=apt_update_status
+
+    - name: Install dependencies
+      apt:
+        update_cache: yes
+        name:
+          - vim
+          - nmap
+          - tmux
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - python3-pip
+          - dnsutils
+          - libpam-google-authenticator
+          - expect
+        state: present
+      become: yes
+
+    #    - name: Print all available facts
+    #      ansible.builtin.debug:
+    #        var: ansible_facts
+    #      when: not apt_update_status.changed
+
+    - name: Add an docker apt signing key
+      apt_key:
+        url: https://download.docker.com/linux/debian/gpg
+        state: present
+        keyring: /usr/share/keyrings/docker-archive-keyring.gpg
+      become: yes
+
+    - name: add docker repository to apt
+      apt_repository:
+        repo: deb [arch=armhf signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian buster stable
+        state: present
+      become: yes
+
+    - name: Add an syncthing apt signing key
+      apt_key:
+        url: https://syncthing.net/release-key.txt
+        state: present
+      become: yes
+
+    - name: add syncthing repository
+      apt_repository:
+        repo: deb https://apt.syncthing.net/ syncthing stable
+        state: present
+      become: yes
+
+    - name: Install Docker & syncthing
+      apt:
+        update_cache: yes
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - syncthing
+        state: present
+      become: yes
+
+    - name: Docker is running properly
+      service:
+        name: docker
+        state: started
+        enabled: yes
+        daemon_reload: yes
+      become: yes
+
+    - name: Install Docker Compose
+      pip:
+        name: docker-compose
+      become: yes
+
+    - name: Set LANG
+      lineinfile:
+        path: /etc/default/locale
+        regexp: "^LANG="
+        line: LANG=en_US.UTF-8
+      become: yes
+
+    - name: Set LC_ALL and LANGUAGE
+      blockinfile:
+        path: /etc/default/locale
+        block: |
+          LC_ALL=en_US.UTF-8
+          LANGUAGE=en_US.UTF-8
+      become: yes
+
+    - name: Disable en_GB
+      lineinfile:
+        path: /etc/locale.gen
+        regexp: "^en_GB.UTF-8 UTF-8"
+        line: "# en_GB.UTF-8 UTF-8"
+        backrefs: yes
+      register: dis_en_GB
+      become: yes
+
+    - name: Enable en_US
+      lineinfile:
+        path: /etc/locale.gen
+        regexp: "^# en_US.UTF-8 UTF-8"
+        line: en_US.UTF-8 UTF-8
+        backrefs: yes
+      register: ena_en_US
+      become: yes
+
+    - name: Generate locale
+      command: locale-gen
+      when: dis_en_GB.changed or ena_en_US.changed
+      become: yes
+
+    - name: Set localtime
+      file:
+        src: /usr/share/zoneinfo/{{ timezone }}
+        dest: /etc/localtime
+        state: link
+      become: yes
+
+    - name: Create pihole directory
+      file:
+        path: "/home/{{ ansible_user }}/pihole"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        state: directory
+        mode: 0755
+
+    - name: Copy pihole docker-compose file with owner and permissions
+      copy:
+        src: "{{ playbook_dir }}/templates/docker-compose.yml"
+        dest: /home/{{ ansible_user }}/pihole/
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: 0755
+
+    - name: Tear down existing services
+      docker_compose:
+        project_src: /home/{{ ansible_user }}/pihole/
+        state: absent
+      become: yes
+
+    - name: Create and start services
+      docker_compose:
+        project_src: /home/{{ ansible_user }}/pihole/
+      register: output
+      become: yes
+
+    - name: Create ngrok directory
+      file:
+        path: "/home/{{ ansible_user }}/ngrok.d"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        state: directory
+        mode: 0755
+
+    - name: Extract foo.tgz into /var/lib/foo
+      unarchive:
+        src: https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-linux-arm.zip
+        dest: /home/{{ ansible_user }}/ngrok.d/
+        remote_src: yes
+
+    - name: check ngrok conf done
+      stat:
+        path: /home/{{ ansible_user }}/.ngrok2/
+      register: ngrok_conf_dir
+
+    - name: set ngrok auth token
+      command: "/home/{{ ansible_user }}/ngrok.d/ngrok authtoken {{ ngrok_auth_token }}"
+      when: not ngrok_conf_dir.stat.exists
+
+    - name: Setup ngrok service
+      template:
+        src: "{{ playbook_dir }}/templates/ngrok_service.j2"
+        dest: /lib/systemd/system/ngrok.service
+        mode: 0644
+      become: yes
+
+    - name: Download syncthing service
+      get_url:
+        url: https://raw.githubusercontent.com/syncthing/syncthing/main/etc/linux-systemd/system/syncthing%40.service
+        dest: /lib/systemd/system/syncthing@service
+        mode: 0644
+      become: yes
+
+    - name: Enable & start syncthing
+      service:
+        name: syncthing@{{ ansible_user }}.service
+        state: started
+        enabled: yes
+        daemon_reload: yes
+      become: yes
+
+    - name: Copy check ngrok flag systemd timer
+      copy:
+        src: "{{ playbook_dir }}/templates/check-ngrok-flag.timer"
+        dest: /lib/systemd/system/
+        owner: root
+        group: root
+        mode: 0644
+      become: yes
+
+    - name: Copy check ngrok flag script
+      copy:
+        src: "{{ playbook_dir }}/scripts/trigger_ngrok.sh"
+        dest: "/home/{{ ansible_user }}/ngrok.d"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: 0700
+
+    - name: Setup check ngrok flag service
+      template:
+        src: "{{ playbook_dir }}/templates/check-ngrok-flag.j2"
+        dest: /lib/systemd/system/check-ngrok-flag.service
+        mode: 0644
+      become: yes
+
+    - name: Start check ngrok flag timer
+      service:
+        name: check-ngrok-flag.timer
+        state: started
+        enabled: yes
+        daemon_reload: yes
+      become: yes
+
+    - name: Comment sshd challenge line
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^ChallengeResponseAuthentication no"
+        line: "#ChallengeResponseAuthentication no"
+        backrefs: true
+      become: yes
+
+    - name: Disable ssh X11 forwarding
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^X11Forwarding yes"
+        line: "X11Forwarding no"
+        backrefs: true
+      become: yes
+
+    - name: Hardening
+      blockinfile:
+        path: /etc/ssh/sshd_config
+        validate: /usr/sbin/sshd -T -f %s
+        block: |
+          PermitRootLogin no
+          MaxAuthTries 3
+          MaxSessions 5
+          PasswordAuthentication no
+          PubkeyAuthentication yes
+          Port {{ ssh_port_number }}
+          ChallengeResponseAuthentication yes
+          AuthenticationMethods publickey,keyboard-interactive
+      register: sshd
+      become: yes
+
+    - name: 2fa ssh conf
+      blockinfile:
+        path: /etc/pam.d/sshd
+        block: |
+          auth required pam_google_authenticator.so
+      become: yes
+
+    - name: check google authenticator conf done
+      stat:
+        path: /home/{{ ansible_user }}/.google_authenticator
+      register: fa2_conf
+
+    - name: Setup google authenticator 2fa
+      script: "{{ playbook_dir }}/scripts/2fa_setup.exp"
+      when: not fa2_conf.stat.exists
+
+    - name: Allow ssh pub key
+      authorized_key:
+        user: "{{ ansible_user }}"
+        key: "{{ lookup('file', public_key_path) }}"
+      register: ssh_key
+
+    - name: output 2fa keys
+      command: cat /home/{{ ansible_user }}/.google_authenticator
+      when: not fa2_conf.stat.exists
+
+    - name: Restart sshd
+      service:
+        name: sshd
+        state: restarted
+        daemon_reload: yes
+      when: sshd.changed or ssh_key.changed or not fa2_conf.stat.exists
+      become: yes
