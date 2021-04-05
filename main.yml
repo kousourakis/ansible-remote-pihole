@@ -8,11 +8,7 @@
         state: latest
         update_cache: yes
         only_upgrade: yes
-      #      register: apt_update_status
       become: yes
-
-    #    - name: Debug specific var
-    #      debug: var=apt_update_status
 
     - name: Install dependencies
       apt:
@@ -32,11 +28,6 @@
           - expect
         state: present
       become: yes
-
-    #    - name: Print all available facts
-    #      ansible.builtin.debug:
-    #        var: ansible_facts
-    #      when: not apt_update_status.changed
 
     - name: Add an docker apt signing key
       apt_key:
